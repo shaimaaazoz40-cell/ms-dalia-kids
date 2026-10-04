@@ -40,9 +40,8 @@ service cloud.firestore {
 
     // علامة "تم الإعداد الأول"
     match /settings/{id} {
-      allow read: if id == 'init' || (active() && id == 'scheduleImage');
-      allow create: if (id == 'init' && request.auth != null && !initDone()) || (id == 'scheduleImage' && isAdmin());
-      allow update: if id == 'scheduleImage' && isAdmin();
+      allow read: if id == 'init';
+      allow create: if id == 'init' && request.auth != null && !initDone();
     }
 
     // ---------- الأطفال (المعلمة ترى أطفال فصلها فقط) ----------
@@ -51,7 +50,7 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // ---------- البيانات المالية (المديرة فقط) ----------
+    // ---------- البيانات المالية (المدير فقط) ----------
     match /fees/{id} { allow read, write: if isAdmin(); }
     match /payments/{id} { allow read, write: if isAdmin(); }
     match /expenses/{id} { allow read, write: if isAdmin(); }

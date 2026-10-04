@@ -1,12 +1,9 @@
 import {
-  doc, setDoc, deleteDoc, updateDoc, query, where, serverTimestamp, getDoc,
+  doc, setDoc, deleteDoc, updateDoc, query, where, serverTimestamp,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import {
   createUserWithEmailAndPassword, signOut, sendPasswordResetEmail,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import {
-  getStorage, ref as storageRef, uploadBytes, getDownloadURL,
-} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js";
 import {
   auth, db, secondaryAuth, state, isAdmin, CLASSES, className, DAYS, PAY_TYPES, EXPENSE_CATS,
   $, $$, esc, todayStr, monthStr, monthsBetween, num, sum, money, byName, empty, options,
@@ -28,12 +25,12 @@ export async function viewSchedule(el) {
   el.innerHTML = `
     <div class="page-head"><h2>${admin ? "جداول المعلمات" : "جدولي الأسبوعي"}</h2>
       <div class="toolbar" style="margin:0">
-        ${admin ? '<button class="btn" id="uploadSchedule">رفع صورة الجدول</button><input id="scheduleFile" type="file" accept="image/*" hidden><button class="btn primary" id="add">+ إضافة حصة</button>' : ""}
+        ${admin ? '<button class="btn" id="scheduleHelp">طريقة تحديث صورة الجدول</button><button class="btn primary" id="add">+ إضافة حصة</button>' : ""}
         <button class="btn" id="print">طباعة</button>
       </div></div>
     ${admin ? `<div class="toolbar"><select id="tf" style="max-width:240px"><option value="all">كل المعلمات</option>${options(teachers, "")}</select></div>` : ""}
     <div id="list"></div>
-    <div id="scheduleImageBox" class="card"><div class="loading">جاري تحميل صورة الجدول…</div></div>`;
+    <div id="scheduleImageBox" class="card"></div>`;
 
   const draw = () => {
     const shown = items.filter((i) => f.t === "all" || i.teacherId === f.t);
@@ -54,32 +51,16 @@ export async function viewSchedule(el) {
   };
   const reload = async () => { items = await load(); draw(); };
   draw();
-  async function drawScheduleImage() {
+  function drawScheduleImage() {
     const box = $("#scheduleImageBox", el); if (!box) return;
-    const snap = await getDoc(doc(db, "settings", "scheduleImage"));
-    const url = snap.exists() ? snap.data().url : "";
-    box.innerHTML = url ? `<h3>صورة الجدول الأسبوعي</h3><img src="${esc(url)}" alt="صورة الجدول" style="max-width:100%;border-radius:12px;display:block;margin:auto">` : '<p class="muted">لم يتم رفع صورة للجدول بعد.</p>';
+    box.innerHTML = `<h3>صورة الجدول الأسبوعي</h3><img src="assets/schedule.jpg" alt="صورة الجدول" style="max-width:100%;border-radius:12px;display:block;margin:auto" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"><p class="muted" style="display:none">لم يتم إضافة صورة الجدول بعد. راجعي التعليمات أعلى الصفحة.</p>`;
   }
   drawScheduleImage();
 
   $("#print", el).onclick = () => window.print();
   if (admin) {
-    const up = $("#uploadSchedule", el), fileInput = $("#scheduleFile", el);
-    up.onclick = () => fileInput.click();
-    fileInput.onchange = async () => {
-      const file = fileInput.files?.[0]; if (!file) return;
-      if (!file.type.startsWith("image/")) return toast("اختاري صورة فقط", "error");
-      up.disabled = true;
-      try {
-        const storage = getStorage();
-        const ref = storageRef(storage, `schedule/${Date.now()}-${file.name.replace(/[^\w.-]/g, "_")}`);
-        const snap = await uploadBytes(ref, file);
-        const url = await getDownloadURL(snap.ref);
-        await setDoc(doc(db, "settings", "scheduleImage"), { url, name: file.name, updatedAt: serverTimestamp(), by: state.profile.uid });
-        toast("تم رفع صورة الجدول"); await drawScheduleImage();
-      } catch (err) { toast("تعذّر رفع الصورة: " + (err.message || "تحققي من قواعد Storage"), "error"); }
-      finally { up.disabled = false; fileInput.value = ""; }
-    };
+    const help = $("#scheduleHelp", el);
+    help.onclick = () => modal("تحديث صورة الجدول", `<p>لرفع صورة جديدة بدون Firebase Storage:</p><ol><li>سمّي الصورة <b>schedule.jpg</b>.</li><li>ضعيها داخل مجلد <b>assets</b> في GitHub.</li><li>اختاري استبدال الملف القديم ثم اعملي Commit changes.</li><li>حدّثي الموقع بعد دقيقة أو دقيقتين.</li></ol><p class="hint">يجب أن تكون الصورة بصيغة JPG وباسم schedule.jpg بالضبط.</p>`);
   }
   if (!admin) return;
   $("#tf", el).onchange = (e) => { f.t = e.target.value; draw(); };

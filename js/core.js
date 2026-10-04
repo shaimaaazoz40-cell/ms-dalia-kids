@@ -6,7 +6,7 @@ import { firebaseConfig } from "./firebase-config.js";
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
-// تطبيق ثانٍ يُستخدم فقط لإنشاء حسابات المعلمات دون تسجيل خروج المديرة
+// تطبيق ثانٍ يُستخدم فقط لإنشاء حسابات المعلمات دون تسجيل خروج المدير
 export const secondaryAuth = getAuth(initializeApp(firebaseConfig, "secondary"));
 
 export const state = { user: null, profile: null, settingUp: false, flash: null };
