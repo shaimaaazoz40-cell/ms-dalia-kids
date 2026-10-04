@@ -1,0 +1,95 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- دوال مساعدة ----------
+    function userPath() {
+      return /databases/$(database)/documents/users/$(request.auth.uid);
+    }
+    function hasProfile() {
+      return request.auth != null && exists(userPath());
+    }
+    function prof() {
+      return get(userPath()).data;
+    }
+    function active() {
+      return hasProfile() && prof().active == true;
+    }
+    function isAdmin() {
+      return active() && prof().role == 'admin';
+    }
+    function isTeacher() {
+      return active() && prof().role == 'teacher';
+    }
+    function myClasses() {
+      return prof().get('classIds', []);
+    }
+    function initDone() {
+      return exists(/databases/$(database)/documents/settings/init);
+    }
+
+    // ---------- المستخدمون ----------
+    match /users/{userId} {
+      allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
+      // المديرة تنشئ الحسابات. وأول مرة فقط يمكن إنشاء حساب المديرة الأولى.
+      allow create: if isAdmin()
+        || (request.auth != null && request.auth.uid == userId
+            && request.resource.data.role == 'admin' && !initDone());
+      allow update, delete: if isAdmin();
+    }
+
+    // علامة "تم الإعداد الأول"
+    match /settings/{id} {
+      allow read: if id == 'init';
+      allow create: if id == 'init' && request.auth != null && !initDone();
+    }
+
+    // ---------- الأطفال (المعلمة ترى أطفال فصلها فقط) ----------
+    match /students/{id} {
+      allow read: if isAdmin() || (isTeacher() && resource.data.classId in myClasses());
+      allow write: if isAdmin();
+    }
+
+    // ---------- البيانات المالية (المديرة فقط) ----------
+    match /fees/{id} { allow read, write: if isAdmin(); }
+    match /payments/{id} { allow read, write: if isAdmin(); }
+    match /expenses/{id} { allow read, write: if isAdmin(); }
+
+    // ---------- حضور الأطفال ----------
+    match /attendance/{id} {
+      allow read: if isAdmin() || (isTeacher() && (resource == null || resource.data.classId in myClasses()));
+      allow create: if isAdmin() || (isTeacher() && request.resource.data.classId in myClasses());
+      allow update: if isAdmin()
+        || (isTeacher() && resource.data.classId in myClasses() && request.resource.data.classId in myClasses());
+      allow delete: if isAdmin();
+    }
+
+    // ---------- حضور وانصراف المعلمات ----------
+    match /staffAttendance/{id} {
+      allow read: if isAdmin() || (isTeacher() && (resource == null || resource.data.uid == request.auth.uid));
+      allow create: if isAdmin()
+        || (isTeacher()
+            && request.resource.data.keys().hasOnly(['uid', 'name', 'date', 'checkIn'])
+            && request.resource.data.uid == request.auth.uid
+            && id == request.resource.data.date + '_' + request.auth.uid
+            && request.resource.data.checkIn == request.time);
+      allow update: if isAdmin()
+        || (isTeacher()
+            && resource.data.uid == request.auth.uid
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checkOut'])
+            && request.resource.data.checkOut == request.time);
+      allow delete: if isAdmin();
+    }
+
+    // ---------- الجداول ----------
+    match /schedules/{id} {
+      allow read: if isAdmin() || (isTeacher() && resource.data.teacherId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    // أي شيء آخر ممنوع
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
