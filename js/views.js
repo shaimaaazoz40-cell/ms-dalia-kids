@@ -4,7 +4,7 @@ import {
 import {
   db, state, isAdmin, CLASSES, className, DAYS, START_MIN, END_MIN, GRACE,
   $, $$, esc, pad, todayStr, monthStr, daysInMonth, num, sum, money, fmtTime, fmtDateAr,
-  byName, empty, options, col, getAll, classify, toast, modal,
+  byName, empty, options, col, getAll, classify, toast, modal, isWorkday,
 } from "./core.js";
 
 export * from "./views2.js";
@@ -20,7 +20,7 @@ export async function loadStudents() {
 }
 
 /* ======================================================================
-   لوحة المديرة
+   لوحة المدير
    ====================================================================== */
 export async function viewDashboard(el) {
   const today = todayStr(), ym = monthStr();
@@ -77,11 +77,43 @@ export async function viewDashboard(el) {
 /* ======================================================================
    الأطفال
    ====================================================================== */
+
+async function importStudentsFromExcel(file) {
+  const XLSX = await import("https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs");
+  const data = await file.arrayBuffer();
+  const wb = XLSX.read(data, { type: "array" });
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+  const find = (row, names) => {
+    const key = Object.keys(row).find((k) => names.some((n) => String(k).trim().toLowerCase().includes(n)));
+    return key ? String(row[key]).trim() : "";
+  };
+  const classIdOf = (value) => {
+    const v = String(value).trim().toLowerCase().replace(/\s+/g, "");
+    const found = CLASSES.find((c) => c.id === v || c.name.toLowerCase().replace(/\s+/g, "") === v || c.name.toLowerCase().includes(v) || v.includes(c.id));
+    return found?.id || "";
+  };
+  const clean = rows.map((r) => ({
+    name: find(r, ["اسم الطفل", "الطفل", "الاسم", "name"]),
+    classId: classIdOf(find(r, ["الفصل", "class", "group"])),
+  })).filter((r) => r.name);
+  if (!clean.length) throw new Error("لم يتم العثور على أسماء. يجب أن يحتوي الملف على عمود الاسم وعمود الفصل.");
+  const invalid = clean.filter((r) => !r.classId);
+  if (invalid.length) throw new Error(`يوجد ${invalid.length} صف بدون فصل صحيح. استخدمي: Pre 1 أو Pre 2 أو KG 1 أو KG 2`);
+  for (let i = 0; i < clean.length; i += 400) {
+    const b = writeBatch(db);
+    clean.slice(i, i + 400).forEach((r) => b.set(doc(col("students")), {
+      name: r.name, classId: r.classId, startMonth: monthStr(), guardianName: "", phone: "", notes: "", active: true, createdAt: serverTimestamp(), updatedAt: serverTimestamp(),
+    }));
+    await b.commit();
+  }
+  return clean.length;
+}
+
 export async function viewStudents(el) {
   const admin = isAdmin();
   const classes = myClasses();
   if (!classes.length) {
-    el.innerHTML = empty("لم يتم تعيين فصل لحسابك بعد. تواصلي مع المديرة.");
+    el.innerHTML = empty("لم يتم تعيين فصل لحسابك بعد. تواصل مع المدير.");
     return;
   }
   let students = await loadStudents();
@@ -94,7 +126,7 @@ export async function viewStudents(el) {
 
   el.innerHTML = `
     <div class="page-head"><h2>${admin ? "الأطفال والفصول" : "أطفال فصلي"}</h2>
-      ${admin ? '<button class="btn primary" id="add">+ إضافة طفل</button>' : ""}</div>
+      ${admin ? '<div class="toolbar" style="margin:0"><button class="btn" id="importExcel">استيراد Excel</button><input id="excelFile" type="file" accept=".xlsx,.xls,.csv" hidden><button class="btn primary" id="add">+ إضافة طفل</button></div>' : ""}</div>
     <div class="chips" id="chips"></div>
     <div class="toolbar">
       <input type="search" id="q" placeholder="بحث بالاسم أو اسم ولي الأمر…">
@@ -141,6 +173,17 @@ export async function viewStudents(el) {
   if (arch) arch.onchange = (e) => { f.archived = e.target.checked; draw(); };
   const add = $("#add", el);
   if (add) add.onclick = () => studentForm({}, {}, reload);
+  const importBtn = $("#importExcel", el), excelFile = $("#excelFile", el);
+  if (importBtn && excelFile) {
+    importBtn.onclick = () => excelFile.click();
+    excelFile.onchange = async () => {
+      const file = excelFile.files?.[0]; if (!file) return;
+      importBtn.disabled = true;
+      try { const n = await importStudentsFromExcel(file); toast(`تم استيراد ${n} طفل بنجاح`); await reload(); }
+      catch (err) { toast(err.message || "تعذّر استيراد الملف", "error"); }
+      finally { importBtn.disabled = false; excelFile.value = ""; }
+    };
+  }
 
   el.onclick = async (e) => {
     const chip = e.target.closest("[data-c]");
@@ -218,100 +261,6 @@ function studentForm(s, fee, afterSave) {
 }
 
 /* ======================================================================
-   حضور الأطفال
-   ====================================================================== */
-export async function viewChildAttendance(el) {
-  const classes = myClasses();
-  if (!classes.length) {
-    el.innerHTML = empty("لم يتم تعيين فصل لحسابك بعد. تواصلي مع المديرة.");
-    return;
-  }
-  const admin = isAdmin();
-  let classId = classes[0].id;
-  let date = todayStr();
-  let kids = [];
-
-  el.innerHTML = `
-    <div class="page-head"><h2>حضور الأطفال</h2></div>
-    <div class="toolbar">
-      <select id="cls" style="max-width:200px">${options(classes, classId)}</select>
-      <input type="date" id="date" value="${date}" style="max-width:190px">
-    </div>
-    <div id="body"></div>
-    ${admin ? `<div class="card" style="margin-top:14px"><h3>ملخص الغياب الشهري للفصل</h3>
-      <div class="toolbar"><input type="month" id="mm" value="${monthStr()}" style="max-width:190px"></div><div id="monthly"></div></div>` : ""}`;
-
-  async function draw() {
-    const body = $("#body", el);
-    body.innerHTML = '<div class="loading">جاري التحميل…</div>';
-    kids = (await getAll(query(col("students"), where("classId", "==", classId)))).filter((s) => s.active !== false).sort(byName);
-    const snap = await getDoc(doc(db, "attendance", `${date}_${classId}`));
-    const rec = snap.exists() ? snap.data().records || {} : {};
-    const weekday = new Date(date + "T00:00:00").getDay();
-    if (!kids.length) {
-      body.innerHTML = empty("لا يوجد أطفال في هذا الفصل");
-    } else {
-      body.innerHTML = `<div class="card">
-        ${weekday > 4 ? '<p class="hint" style="margin:0 0 8px">⚠️ هذا اليوم إجازة أسبوعية.</p>' : ""}
-        <div class="toolbar"><button type="button" class="btn small" id="allP">الكل حاضر</button><span id="sumry" class="muted"></span></div>
-        <div class="table-wrap" style="box-shadow:none"><table><tbody>
-          ${kids.map((k, i) => `<tr><td>${i + 1}</td><td><b>${esc(k.name)}</b></td><td><div class="seg">
-            <label><input type="radio" name="s_${k.id}" value="present" ${rec[k.id] !== "absent" ? "checked" : ""}><span>حاضر</span></label>
-            <label><input type="radio" name="s_${k.id}" value="absent" ${rec[k.id] === "absent" ? "checked" : ""}><span>غائب</span></label>
-          </div></td></tr>`).join("")}
-        </tbody></table></div>
-        <div style="margin-top:12px"><button class="btn primary" id="save">حفظ الحضور</button></div>
-        ${snap.exists() ? `<p class="hint">آخر حفظ بواسطة ${esc(snap.data().byName || "")}</p>` : '<p class="hint">لم يُحفظ حضور هذا اليوم بعد. الجميع حاضر افتراضيًا، علّمي الغائبين فقط ثم احفظي.</p>'}
-      </div>`;
-      const refresh = () => {
-        const a = $$('input[value="absent"]:checked', body).length;
-        $("#sumry", body).textContent = `حاضر ${kids.length - a} • غائب ${a}`;
-      };
-      refresh();
-      body.onchange = refresh;
-      $("#allP", body).onclick = () => { $$('input[value="present"]', body).forEach((r) => (r.checked = true)); refresh(); };
-      $("#save", body).onclick = async (e) => {
-        e.target.disabled = true;
-        try {
-          const records = {};
-          kids.forEach((k) => (records[k.id] = $(`input[name="s_${k.id}"]:checked`, body).value));
-          await setDoc(doc(db, "attendance", `${date}_${classId}`), {
-            date, classId, records, by: state.profile.uid, byName: state.profile.name, updatedAt: serverTimestamp(),
-          });
-          toast("تم حفظ الحضور");
-        } catch (err) {
-          toast("تعذّر الحفظ: " + (err.code === "permission-denied" ? "ليس لديك صلاحية" : err.message), "error");
-        }
-        e.target.disabled = false;
-      };
-    }
-    if (admin) drawMonthly();
-  }
-
-  async function drawMonthly() {
-    const m = $("#mm", el).value;
-    const box = $("#monthly", el);
-    if (!m) return;
-    const docs = (await getAll(query(col("attendance"), where("date", ">=", `${m}-01`), where("date", "<=", `${m}-31`)))).filter((d) => d.classId === classId);
-    const rows = kids.map((k) => ({
-      name: k.name,
-      absent: docs.filter((d) => d.records?.[k.id] === "absent").length,
-      days: docs.filter((d) => d.records && k.id in d.records).length,
-    }));
-    box.innerHTML = docs.length
-      ? `<div class="table-wrap" style="box-shadow:none"><table><thead><tr><th>الاسم</th><th>أيام الغياب</th><th>أيام مسجَّلة</th></tr></thead><tbody>
-        ${rows.map((r) => `<tr><td>${esc(r.name)}</td><td><span class="badge ${r.absent >= 3 ? "absent" : r.absent ? "late" : "present"}">${r.absent}</span></td><td>${r.days}</td></tr>`).join("")}
-      </tbody></table></div>`
-      : '<p class="muted">لا يوجد حضور مسجَّل في هذا الشهر لهذا الفصل.</p>';
-  }
-
-  $("#cls", el).onchange = (e) => { classId = e.target.value; draw(); };
-  $("#date", el).onchange = (e) => { if (e.target.value) { date = e.target.value; draw(); } };
-  if (admin) $("#mm", el).onchange = drawMonthly;
-  draw();
-}
-
-/* ======================================================================
    لوحة المعلمة (حضور/انصراف + جدول اليوم)
    ====================================================================== */
 export async function viewTeacherHome(el) {
@@ -360,7 +309,7 @@ export async function viewTeacherHome(el) {
     if (inBtn) inBtn.onclick = async () => {
       inBtn.disabled = true;
       try {
-        await setDoc(ref, { uid: p.uid, name: p.name, date, checkIn: serverTimestamp() });
+        await setDoc(ref, { uid: p.uid, name: p.name, date, workday: isWorkday(date), checkIn: serverTimestamp() });
         toast("تم تسجيل حضورك ✅");
       } catch (e) { toast("تعذّر التسجيل. ربما سجّلتك الإدارة بحالة أخرى.", "error"); }
       draw();
@@ -379,7 +328,7 @@ export async function viewTeacherHome(el) {
 }
 
 /* ======================================================================
-   حضور وانصراف المعلمات (المديرة)
+   حضور وانصراف المعلمات (المدير)
    ====================================================================== */
 export async function viewStaffAttendance(el) {
   let date = todayStr();
@@ -398,6 +347,7 @@ export async function viewStaffAttendance(el) {
 
   async function drawDay() {
     const box = $("#day", el);
+    if (!isWorkday(date)) { box.innerHTML = '<p class="hint">الجمعة والسبت إجازة أسبوعية، ولا يتم تسجيل حضور أو انصراف فيهما.</p>'; return; }
     const [users, recs] = await Promise.all([
       getAll(col("users")),
       getAll(query(col("staffAttendance"), where("date", "==", date))),
@@ -429,7 +379,7 @@ export async function viewStaffAttendance(el) {
       if (st) {
         const u = t(st.dataset.u);
         if (by[u.id]?.checkIn && !confirm("هذه المعلمة لديها حضور مسجَّل. هل تريدين استبداله؟")) return;
-        await setDoc(ref(u.id), { uid: u.id, name: u.name, date, status: st.dataset.st });
+        await setDoc(ref(u.id), { uid: u.id, name: u.name, date, workday: isWorkday(date), status: st.dataset.st });
         toast("تم التسجيل");
         return drawDay().then(drawMonth);
       }
@@ -449,7 +399,7 @@ export async function viewStaffAttendance(el) {
             <label class="f"><span>وقت الانصراف</span><input type="time" name="out" value="${toTime(r?.checkOut)}"></label>
           </div><p class="hint">يُستخدم لو نسيت المعلمة التسجيل.</p>`,
           { onSubmit: async (fd) => {
-            const data = { uid: u.id, name: u.name, date, checkIn: Timestamp.fromDate(new Date(`${date}T${fd.get("in")}:00`)) };
+            const data = { uid: u.id, name: u.name, date, workday: isWorkday(date), checkIn: Timestamp.fromDate(new Date(`${date}T${fd.get("in")}:00`)) };
             if (fd.get("out")) data.checkOut = Timestamp.fromDate(new Date(`${date}T${fd.get("out")}:00`));
             await setDoc(ref(u.id), data);
             toast("تم الحفظ");

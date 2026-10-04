@@ -8,7 +8,6 @@ import * as V from "./views.js";
 const ADMIN_NAV = [
   { id: "dashboard", label: "الرئيسية", icon: "🏠", fn: V.viewDashboard },
   { id: "students", label: "الأطفال والفصول", icon: "🧒", fn: V.viewStudents },
-  { id: "attendance", label: "حضور الأطفال", icon: "✅", fn: V.viewChildAttendance },
   { id: "staff", label: "حضور المعلمات", icon: "🕗", fn: V.viewStaffAttendance },
   { id: "schedule", label: "جداول المعلمات", icon: "📅", fn: V.viewSchedule },
   { id: "fees", label: "التحصيل", icon: "💰", fn: V.viewFees },
@@ -18,7 +17,6 @@ const ADMIN_NAV = [
 const TEACHER_NAV = [
   { id: "home", label: "الرئيسية", icon: "🏠", fn: V.viewTeacherHome },
   { id: "students", label: "أطفال فصلي", icon: "🧒", fn: V.viewStudents },
-  { id: "attendance", label: "حضور الأطفال", icon: "✅", fn: V.viewChildAttendance },
   { id: "schedule", label: "جدولي", icon: "📅", fn: V.viewSchedule },
 ];
 const navItems = () => (isAdmin() ? ADMIN_NAV : TEACHER_NAV);
@@ -49,7 +47,7 @@ async function showLogin() {
           <button class="btn primary" style="width:100%" type="submit">دخول</button>
         </form>
         <button class="link-btn" id="forgot">نسيت كلمة المرور؟</button>
-        ${initialized ? "" : `<hr style="border:0;border-top:1px solid var(--line);margin:12px 0"><button class="link-btn" id="setup">أول استخدام؟ إنشاء حساب المديرة</button>`}
+        ${initialized ? "" : `<hr style="border:0;border-top:1px solid var(--line);margin:12px 0"><button class="link-btn" id="setup">أول استخدام؟ إنشاء حساب المدير</button>`}
       </div>
     </div>`;
 
@@ -67,7 +65,7 @@ async function showLogin() {
   };
   $("#forgot").onclick = async () => {
     const email = $("[name=email]").value.trim();
-    if (!email) return toast("اكتبي بريدك الإلكتروني أولًا ثم اضغطي نسيت كلمة المرور", "error");
+    if (!email) return toast("اكتب بريدك الإلكتروني أولًا ثم اضغطي نسيت كلمة المرور", "error");
     try {
       await sendPasswordResetEmail(auth, email);
       toast("تم إرسال رابط تغيير كلمة المرور على بريدك");
@@ -84,7 +82,7 @@ function showSetup() {
     <div class="login-wrap">
       <div class="login-card">
         <img class="logo" src="${LOGO}" alt="" onerror="this.style.display='none'">
-        <h1>إنشاء حساب المديرة</h1>
+        <h1>إنشاء حساب المدير</h1>
         <p class="sub">تُنفَّذ مرة واحدة فقط عند أول استخدام</p>
         <form id="setupForm">
           <label class="f"><span>الاسم</span><input name="name" required></label>
@@ -135,8 +133,8 @@ async function handleUser(user) {
     const snap = await getDoc(doc(db, "users", user.uid));
     if (!snap.exists() || snap.data().active === false) {
       state.flash = snap.exists()
-        ? "هذا الحساب موقوف. تواصلي مع المديرة."
-        : "هذا الحساب غير مسجّل في النظام. تواصلي مع المديرة.";
+        ? "هذا الحساب موقوف. تواصل مع المدير."
+        : "هذا الحساب غير مسجّل في النظام. تواصل مع المدير.";
       await signOut(auth);
       return;
     }
@@ -155,7 +153,7 @@ function showShell() {
     <header class="topbar">
       <div class="brand">
         <img src="${LOGO}" alt="" onerror="this.style.display='none'">
-        <div><b>مس داليا كيدز</b><small>${isAdmin() ? "لوحة المديرة" : "لوحة المعلمة"}</small></div>
+        <div><b>مس داليا كيدز</b><small>${isAdmin() ? "لوحة المدير" : "لوحة المعلمة"}</small></div>
       </div>
       <div class="user"><span>${esc(state.profile.name)}</span><button class="btn small" id="logout">خروج</button></div>
     </header>

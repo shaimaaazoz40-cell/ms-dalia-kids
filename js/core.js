@@ -22,6 +22,10 @@ export const CLASSES = [
 ];
 export const className = (id) => CLASSES.find((c) => c.id === id)?.name || "—";
 export const DAYS = ["الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس"]; // 0..4 (أيام العمل)
+export const isWorkday = (dateOrDay) => {
+  const day = typeof dateOrDay === "number" ? dateOrDay : new Date(`${dateOrDay}T00:00:00`).getDay();
+  return day <= 4;
+};
 export const START_MIN = 8 * 60;   // بداية الدوام 8:00
 export const GRACE = 15;           // سماح بالدقائق
 export const END_MIN = 13 * 60;    // نهاية الدوام 1:00

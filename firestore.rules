@@ -31,7 +31,7 @@ service cloud.firestore {
     // ---------- المستخدمون ----------
     match /users/{userId} {
       allow read: if request.auth != null && (request.auth.uid == userId || isAdmin());
-      // المديرة تنشئ الحسابات. وأول مرة فقط يمكن إنشاء حساب المديرة الأولى.
+      // المدير ينشئ الحسابات. وأول مرة فقط يمكن إنشاء حساب المدير الأول.
       allow create: if isAdmin()
         || (request.auth != null && request.auth.uid == userId
             && request.resource.data.role == 'admin' && !initDone());
@@ -40,8 +40,9 @@ service cloud.firestore {
 
     // علامة "تم الإعداد الأول"
     match /settings/{id} {
-      allow read: if id == 'init';
-      allow create: if id == 'init' && request.auth != null && !initDone();
+      allow read: if id == 'init' || (active() && id == 'scheduleImage');
+      allow create: if (id == 'init' && request.auth != null && !initDone()) || (id == 'scheduleImage' && isAdmin());
+      allow update: if id == 'scheduleImage' && isAdmin();
     }
 
     // ---------- الأطفال (المعلمة ترى أطفال فصلها فقط) ----------
@@ -55,24 +56,16 @@ service cloud.firestore {
     match /payments/{id} { allow read, write: if isAdmin(); }
     match /expenses/{id} { allow read, write: if isAdmin(); }
 
-    // ---------- حضور الأطفال ----------
-    match /attendance/{id} {
-      allow read: if isAdmin() || (isTeacher() && (resource == null || resource.data.classId in myClasses()));
-      allow create: if isAdmin() || (isTeacher() && request.resource.data.classId in myClasses());
-      allow update: if isAdmin()
-        || (isTeacher() && resource.data.classId in myClasses() && request.resource.data.classId in myClasses());
-      allow delete: if isAdmin();
-    }
-
     // ---------- حضور وانصراف المعلمات ----------
     match /staffAttendance/{id} {
       allow read: if isAdmin() || (isTeacher() && (resource == null || resource.data.uid == request.auth.uid));
       allow create: if isAdmin()
         || (isTeacher()
-            && request.resource.data.keys().hasOnly(['uid', 'name', 'date', 'checkIn'])
+            && request.resource.data.keys().hasOnly(['uid', 'name', 'date', 'checkIn', 'workday'])
             && request.resource.data.uid == request.auth.uid
             && id == request.resource.data.date + '_' + request.auth.uid
-            && request.resource.data.checkIn == request.time);
+            && request.resource.data.checkIn == request.time
+            && request.resource.data.workday == true);
       allow update: if isAdmin()
         || (isTeacher()
             && resource.data.uid == request.auth.uid
